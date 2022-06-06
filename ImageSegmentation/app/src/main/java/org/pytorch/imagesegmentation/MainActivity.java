@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity implements Runnable {
     private ProgressBar mProgressBar;
     private Bitmap mBitmap = null;
     private Module mModule = null;
-    private String mImagename = "deeplab.jpg";
+    private String mImagename = "rgb_rawlight.png";
 
     // see http://host.robots.ox.ac.uk:8080/pascal/VOC/voc2007/segexamples/index.html for the list of classes with indexes
     private static final int CLASSNUM = 21;
@@ -67,6 +67,7 @@ public class MainActivity extends AppCompatActivity implements Runnable {
 
         try {
             mBitmap = BitmapFactory.decodeStream(getAssets().open(mImagename));
+            mBitmap = Bitmap.createScaledBitmap(mBitmap, 640, 384, true);
         } catch (IOException e) {
             Log.e("ImageSegmentation", "Error reading assets", e);
             finish();
@@ -107,9 +108,15 @@ public class MainActivity extends AppCompatActivity implements Runnable {
         });
 
         try {
-            mModule = LiteModuleLoader.load(MainActivity.assetFilePath(getApplicationContext(), "deeplabv3_scripted_optimized.ptl"));
+//            String fp = MainActivity.assetFilePath(getApplicationContext(), "mobilenet_mobile.pt");
+//            String fp = MainActivity.assetFilePath(getApplicationContext(), "hrnet_mobile.pt");
+            String fp = MainActivity.assetFilePath(getApplicationContext(), "dlab_mobile.pt");
+            mModule = LiteModuleLoader.load(fp);
         } catch (IOException e) {
             Log.e("ImageSegmentation", "Error reading assets", e);
+            finish();
+        } catch (Exception e) {
+            Log.e("ImageSegmentation", "Error", e);
             finish();
         }
     }
@@ -120,51 +127,22 @@ public class MainActivity extends AppCompatActivity implements Runnable {
                 TensorImageUtils.TORCHVISION_NORM_MEAN_RGB, TensorImageUtils.TORCHVISION_NORM_STD_RGB);
         final float[] inputs = inputTensor.getDataAsFloatArray();
 
+        // warm up
+        IValue outValue = mModule.forward(IValue.from(inputTensor));
         final long startTime = SystemClock.elapsedRealtime();
-        Map<String, IValue> outTensors = mModule.forward(IValue.from(inputTensor)).toDictStringKey();
+        for (int i = 0; i < 100; i++) {
+            outValue = mModule.forward(IValue.from(inputTensor));
+        }
         final long inferenceTime = SystemClock.elapsedRealtime() - startTime;
         Log.d("ImageSegmentation",  "inference time (ms): " + inferenceTime);
-
-        final Tensor outputTensor = outTensors.get("out").toTensor();
-        final float[] scores = outputTensor.getDataAsFloatArray();
-        int width = mBitmap.getWidth();
-        int height = mBitmap.getHeight();
-        int[] intValues = new int[width * height];
-        for (int j = 0; j < height; j++) {
-            for (int k = 0; k < width; k++) {
-                int maxi = 0, maxj = 0, maxk = 0;
-                double maxnum = -Double.MAX_VALUE;
-                for (int i = 0; i < CLASSNUM; i++) {
-                    float score = scores[i * (width * height) + j * width + k];
-                    if (score > maxnum) {
-                        maxnum = score;
-                        maxi = i; maxj = j; maxk = k;
-                    }
-                }
-                if (maxi == PERSON)
-                    intValues[maxj * width + maxk] = 0xFFFF0000;
-                else if (maxi == DOG)
-                    intValues[maxj * width + maxk] = 0xFF00FF00;
-                else if (maxi == SHEEP)
-                    intValues[maxj * width + maxk] = 0xFF0000FF;
-                else
-                    intValues[maxj * width + maxk] = 0xFF000000;
-            }
-        }
-
-        Bitmap bmpSegmentation = Bitmap.createScaledBitmap(mBitmap, width, height, true);
-        Bitmap outputBitmap = bmpSegmentation.copy(bmpSegmentation.getConfig(), true);
-        outputBitmap.setPixels(intValues, 0, outputBitmap.getWidth(), 0, 0, outputBitmap.getWidth(), outputBitmap.getHeight());
-        final Bitmap transferredBitmap = Bitmap.createScaledBitmap(outputBitmap, mBitmap.getWidth(), mBitmap.getHeight(), true);
+        Log.d("ImageSegmentation", "output " + outValue.toString());
 
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mImageView.setImageBitmap(transferredBitmap);
                 mButtonSegment.setEnabled(true);
-                mButtonSegment.setText(getString(R.string.segment));
+                mButtonSegment.setText("took " + inferenceTime + " ms");
                 mProgressBar.setVisibility(ProgressBar.INVISIBLE);
-
             }
         });
     }
